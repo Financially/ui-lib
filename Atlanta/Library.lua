@@ -149,15 +149,19 @@
 		end
 
 		local margin = 6
-		local width = max_x - min_x
-		local shift_x = ((camera.ViewportSize.X - width) * 0.5) - min_x
-		local shift_y = 0
-
-		if min_y < margin then
-			shift_y = margin - min_y
-		elseif max_y > camera.ViewportSize.Y - margin then
-			shift_y = camera.ViewportSize.Y - margin - max_y
+		local top_margin = margin
+		if library.dock_outline and library.dock_outline.Parent then
+			top_margin = gui_offset + 8 + (39 * (library.ui_scale or 1))
 		end
+		local width = max_x - min_x
+		local height = max_y - min_y
+		local shift_x = ((camera.ViewportSize.X - width) * 0.5) - min_x
+		local lowest_top = camera.ViewportSize.Y - margin - height
+		local target_min_y = top_margin
+		if lowest_top >= top_margin then
+			target_min_y = clamp(min_y, top_margin, lowest_top)
+		end
+		local shift_y = target_min_y - min_y
 
 		for _, frame in valid do
 			frame.Position = frame.Position + dim_offset(shift_x, shift_y)
