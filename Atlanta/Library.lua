@@ -197,7 +197,7 @@
 					and not library.dock_outline:GetAttribute("AtlantaUserMoved") then
 					library.dock_outline.Position = dim_offset(
 						(camera.ViewportSize.X - library.dock_outline.AbsoluteSize.X) * 0.5,
-						0
+						gui_offset + 4
 					)
 				end
 			end)
@@ -483,6 +483,7 @@
 					local viewport_y = camera.ViewportSize.Y
 					local frame_width = frame.AbsoluteSize.X
 					local frame_height = frame.AbsoluteSize.Y
+					local min_y = frame:GetAttribute("AtlantaMinY") or 0
 
 					local current_position = dim2(
 						0,
@@ -494,8 +495,8 @@
 						0,
 						clamp(
 							start_size.Y.Offset + (input.Position.Y - start.Y),
-							0,
-							math.max(0, viewport_y - frame_height)
+							min_y,
+							math.max(min_y, viewport_y - frame_height)
 						)
 					)
 
@@ -1352,6 +1353,7 @@
 			library.ui_scale_percent = auto_ui_scale
 			local opened = {}
 			local dock_outline;
+			local dock_sgui;
 			local blur = library:create( "BlurEffect" , {
 				Parent = lighting;
 				Enabled = true;
@@ -1386,6 +1388,7 @@
 				dock_outline.Visible = bool;
 
 				sgui.Enabled = true
+				dock_sgui.Enabled = true
 				notif_holder.Enabled = true
 				tooltip_sgui.Enabled = true
 				library.cache.Enabled = false
@@ -1402,13 +1405,25 @@
 			end 
 
 			-- dock init
+				dock_sgui = library:create("ScreenGui", {
+					Enabled = true,
+					Parent = gethui(),
+					Name = "AtlantaDock",
+					IgnoreGuiInset = true,
+					DisplayOrder = 999999,
+					ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+					ResetOnSpawn = false
+				})
+				library.dock_sgui = dock_sgui
+
 				dock_outline = library:create("Frame", {
-					Parent = sgui,
-					Name = "",
+					Parent = dock_sgui,
+					Name = "AtlantaDockFrame",
 					Visible = true,
+					Active = true,
 					BorderColor3 = rgb(0, 0, 0),
 					AnchorPoint = vec2(0, 0),
-					Position = dim2(0, (camera.ViewportSize.X - 157) * 0.5, 0, 0),
+					Position = dim2(0, (camera.ViewportSize.X - 157) * 0.5, 0, gui_offset + 4),
 					Size = dim2(0, 157, 0, 39),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
@@ -1417,6 +1432,7 @@
 				library:apply_theme(dock_outline, "outline", "BackgroundColor3"); 
 				library:attach_ui_scale(dock_outline)
 				library.dock_outline = dock_outline
+				dock_outline:SetAttribute("AtlantaMinY", gui_offset + 4)
 				library:draggify(dock_outline);
 
 				local dock_inline = library:create("Frame", {
