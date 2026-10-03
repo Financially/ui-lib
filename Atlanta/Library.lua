@@ -164,7 +164,7 @@
 	end
 
 	function library:set_ui_scale(percent)
-		library.ui_scale_percent = clamp(tonumber(percent) or 100, 60, 110)
+		library.ui_scale_percent = clamp(tonumber(percent) or 100, 60, 150)
 		library.ui_scale = library.ui_scale_percent / 100
 		-- UIScale changes the contents of each panel around its top-left corner.
 		-- Moving the outer frames as well makes dragged panels jump on every edit.
@@ -1662,7 +1662,7 @@
 
 				local items = main_window.items
 
-				window["tab_holder"] = library:create("Frame", {
+				window["tab_holder"] = library:create("ScrollingFrame", {
 					Parent = items.holder,
 					Name = " ",
 					BackgroundTransparency = 1,
@@ -1670,16 +1670,103 @@
 					BorderColor3 = rgb(0, 0, 0),
 					ZIndex = 5,
 					BorderSizePixel = 0,
+					Active = true,
+					Selectable = false,
+					ClipsDescendants = true,
+					ScrollingDirection = Enum.ScrollingDirection.X,
+					ScrollingEnabled = true,
+					ScrollBarThickness = 1,
+					ScrollBarImageTransparency = 1,
+					AutomaticCanvasSize = Enum.AutomaticSize.X,
+					CanvasSize = dim2(0, 0, 0, 0),
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
 
-				library:create("UIListLayout", {
+				local tab_layout = library:create("UIListLayout", {
 					Parent = window["tab_holder"],
 					FillDirection = Enum.FillDirection.Horizontal,
-					HorizontalFlex = Enum.UIFlexAlignment.Fill,
 					Padding = dim(0, 2),
 					SortOrder = Enum.SortOrder.LayoutOrder
 				})
+				window.tab_buttons = {}
+				local function max_tab_scroll()
+					return math.max(0, window.tab_holder.AbsoluteCanvasSize.X - window.tab_holder.AbsoluteWindowSize.X)
+				end
+				local function set_tab_scroll(x)
+					window.tab_holder.CanvasPosition = vec2(clamp(x, 0, max_tab_scroll()), 0)
+				end
+				function window:update_tab_layout()
+					local count = #self.tab_buttons
+					if count == 0 then return end
+					local scale = library:get_ui_scale(self.tab_holder)
+					local width = self.tab_holder.AbsoluteSize.X / math.max(scale, 0.01)
+					local button_width = math.max(115, floor((width - (count - 1) * 2) / count))
+					for _, button in self.tab_buttons do
+						button.Size = dim2(0, button_width, 1, -2)
+					end
+					task.defer(function()
+						if self.tab_holder.Parent then set_tab_scroll(self.tab_holder.CanvasPosition.X) end
+					end)
+				end
+				function window:ensure_tab_visible(button)
+					local viewport = self.tab_holder
+					local left = viewport.AbsolutePosition.X
+					local right = left + viewport.AbsoluteSize.X
+					local button_left = button.AbsolutePosition.X
+					local button_right = button_left + button.AbsoluteSize.X
+					if button_left < left then
+						set_tab_scroll(viewport.CanvasPosition.X + button_left - left - 2)
+					elseif button_right > right then
+						set_tab_scroll(viewport.CanvasPosition.X + button_right - right + 2)
+					end
+				end
+				library:connection(window.tab_holder:GetPropertyChangedSignal("AbsoluteSize"), function()
+					window:update_tab_layout()
+				end)
+				library:connection(tab_layout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
+					set_tab_scroll(window.tab_holder.CanvasPosition.X)
+				end)
+				local tab_drag = {input = nil, moved = false}
+				function window:begin_tab_drag(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1
+						and input.UserInputType ~= Enum.UserInputType.Touch then return end
+					tab_drag.input = input
+					tab_drag.start_x = input.Position.X
+					tab_drag.start_scroll = self.tab_holder.CanvasPosition.X
+					tab_drag.moved = false
+				end
+				library:connection(window.tab_holder.InputBegan, function(input)
+					window:begin_tab_drag(input)
+				end)
+				library:connection(uis.InputChanged, function(input)
+					if not tab_drag.input then return end
+					local is_mouse = tab_drag.input.UserInputType == Enum.UserInputType.MouseButton1
+						and input.UserInputType == Enum.UserInputType.MouseMovement
+					if not is_mouse and input ~= tab_drag.input then return end
+					local delta = input.Position.X - tab_drag.start_x
+					if tab_drag.moved or math.abs(delta) >= 6 then
+						tab_drag.moved = true
+						if is_mouse then set_tab_scroll(tab_drag.start_scroll - delta) end
+					end
+				end)
+				library:connection(uis.InputEnded, function(input)
+					if not tab_drag.input then return end
+					if input == tab_drag.input or (tab_drag.input.UserInputType == Enum.UserInputType.MouseButton1
+						and input.UserInputType == Enum.UserInputType.MouseButton1) then
+						if tab_drag.moved then window.tab_click_blocked_until = os.clock() + 0.15 end
+						tab_drag.input = nil
+					end
+				end)
+				library:connection(uis.InputChanged, function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+					local point = uis:GetMouseLocation()
+					local origin = window.tab_holder.AbsolutePosition
+					local size = window.tab_holder.AbsoluteSize
+					if point.X >= origin.X and point.X <= origin.X + size.X
+						and point.Y >= origin.Y and point.Y <= origin.Y + size.Y then
+						set_tab_scroll(window.tab_holder.CanvasPosition.X - input.Position.Z * 45)
+					end
+				end)
 
 				local section_holder = library:create("Frame", {
 					Parent = items.holder,
@@ -1826,7 +1913,7 @@
 						library:set_ui_scale(percent)
 					end
 				end)
-				section:slider({name = "UI Scale", suffix = "%", flag = "UI Scale", min = 60, max = 110, default = auto_ui_scale, interval = 1, callback = function(int)
+				section:slider({name = "UI Scale", suffix = "%", flag = "UI Scale", min = 60, max = 150, default = auto_ui_scale, interval = 1, callback = function(int)
 					library.ui_scale_percent = int
 					if library.ui_layout_ready then
 						if uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
@@ -2665,11 +2752,17 @@
 					Name = "\0",
 					BorderSizePixel = 0,
 					Size = dim2(0, 0, 1, -2),
+					LayoutOrder = #self.tab_buttons + 1,
 					ZIndex = 5,
 					TextSize = 12,
 					BackgroundColor3 = themes.preset.outline,
 					AutoButtonColor = false
 				}) library:apply_theme(tab_holder, "outline", "BackgroundColor3") 
+				insert(self.tab_buttons, tab_holder)
+				self:update_tab_layout()
+				library:connection(tab_holder.InputBegan, function(input)
+					self:begin_tab_drag(input)
+				end)
 
 				local inline = library:create("Frame", {
 					Parent = tab_holder,
@@ -2762,6 +2855,9 @@
 				button:FindFirstChildOfClass("TextLabel").TextColor3 = themes.preset.accent 
 
 				library.current_tab[2].Visible = true 
+				task.defer(function()
+					if tab_holder.Parent then self:ensure_tab_visible(tab_holder) end
+				end)
 
 				if library.current_element_open and library.current_element_open ~= cfg then 
 					library.current_element_open.set_visible(false)
@@ -2770,7 +2866,10 @@
 				end
 			end
 			
-			tab_holder.MouseButton1Click:Connect(cfg.open_tab)
+			library:connection(tab_holder.MouseButton1Click, function()
+				if (self.tab_click_blocked_until or 0) > os.clock() then return end
+				cfg.open_tab()
+			end)
 			
 			return setmetatable(cfg, library) 
 		end
@@ -3232,8 +3331,9 @@
 					Name = "bottom_components",
 					Position = dim2(0, 0, 0, cfg.name and 15 or 0),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(1, 0, 0, 0),
+					Size = dim2(1, 0, 0, 14),
 					BorderSizePixel = 0,
+					BackgroundTransparency = 1,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
 				
@@ -3242,7 +3342,7 @@
 					Name = "slider",
 					Position = dim2(0, 0, 0, 2),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(1, -1, 1, 12),
+					Size = dim2(1, -1, 0, 12),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline,
 					Text = "",
@@ -3299,6 +3399,14 @@
 					ZIndex = 2,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
+				local fill_clip = library:create("Frame", {
+					Parent = contrast,
+					Name = "fill_clip",
+					Size = dim2(1, 0, 1, 0),
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					ClipsDescendants = true,
+				})
 				local value_input = library:create("TextBox", {
 					Parent = contrast,
 					Name = "value_input",
@@ -3317,7 +3425,7 @@
 				})
 				
 				local fill = library:create("Frame", {
-					Parent = contrast,
+					Parent = fill_clip,
 					Name = "fill",
 					BorderColor3 = rgb(0, 0, 0),
 					Size = dim2(1, 0, 1, 0),
@@ -3352,17 +3460,17 @@
 					}
 				})
 				
-				library:create("UIListLayout", {
-					Parent = bottom_components,
-					Padding = dim(0, 10),
-					Name = "_",
-					SortOrder = Enum.SortOrder.LayoutOrder
-				})
 			--  
 
 			local function format_value(value)
 				local formatted = string.format("%.3f", value)
 				return formatted:gsub("0+$", ""):gsub("%.$", "")
+			end
+
+			local function update_visual()
+				local range = cfg.max - cfg.min
+				local normalized = range == 0 and 0 or clamp((cfg.value - cfg.min) / range, 0, 1)
+				fill.Size = dim2(normalized, 0, 1, 0)
 			end
 
 			function cfg.set(value)
@@ -3373,13 +3481,15 @@
 
 				cfg.value = math.clamp(library:round(value, math.max(cfg.intervals, 0.001)), cfg.min, cfg.max)
 
-				fill.Size = dim2(cfg.max == cfg.min and 0 or (cfg.value - cfg.min) / (cfg.max - cfg.min), 0, 1, 0)
+				update_visual()
 				slidertext.Text = format_value(cfg.value) .. cfg.suffix
 				value_input.Text = format_value(cfg.value)
 				flags[cfg.flag] = cfg.value
 
 				cfg.callback(flags[cfg.flag])
 			end
+
+			library:connection(contrast:GetPropertyChangedSignal("AbsoluteSize"), update_visual)
 
 			function cfg.set_element_visible(bool)
 				slider_REAL.Visible = bool 
@@ -3411,8 +3521,10 @@
 				end)
 				library:connection(uis.InputChanged, function(input)
 					if cfg.dragging and input.UserInputType == Enum.UserInputType.MouseMovement then 
-						local size_x = (input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X
-						local value = ((cfg.max - cfg.min) * size_x) + cfg.min
+						local width = contrast.AbsoluteSize.X
+						if width <= 0 then return end
+						local normalized = clamp((input.Position.X - contrast.AbsolutePosition.X) / width, 0, 1)
+						local value = ((cfg.max - cfg.min) * normalized) + cfg.min
 						cfg.set(value)
 					end
 				end)
