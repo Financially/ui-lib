@@ -164,22 +164,10 @@
 	end
 
 	function library:set_ui_scale(percent)
-		local previous_scale = library.ui_scale or 1
-		library.ui_scale_percent = clamp(tonumber(percent) or 100, 60, 110)
+		library.ui_scale_percent = clamp(tonumber(percent) or 100, 60, 150)
 		library.ui_scale = library.ui_scale_percent / 100
-		local ratio = library.ui_scale / previous_scale
-		local center_x = camera.ViewportSize.X * 0.5
-
-		for _, frame in library.panel_frames do
-			if frame and frame.Parent then
-				frame.Position = dim2(
-					frame.Position.X.Scale,
-					center_x + (frame.Position.X.Offset - center_x) * ratio,
-					frame.Position.Y.Scale,
-					frame.Position.Y.Offset * ratio
-				)
-			end
-		end
+		-- UIScale changes the contents of each panel around its top-left corner.
+		-- Moving the outer frames as well makes dragged panels jump on every edit.
 
 		for _, ui_scale in library.ui_scales do
 			if ui_scale and ui_scale.Parent then
@@ -187,20 +175,7 @@
 			end
 		end
 
-		if library.ui_layout_ready then
-			task.defer(function()
-				run.RenderStepped:Wait()
-				library:fit_panels_to_viewport()
-				if library.dock_outline
-					and library.dock_outline.Parent
-					and not library.dock_outline:GetAttribute("AtlantaUserMoved") then
-					library.dock_outline.Position = dim_offset(
-						(camera.ViewportSize.X - library.dock_outline.AbsoluteSize.X) * 0.5,
-						0
-					)
-				end
-			end)
-		end
+		-- Keep each panel at its dragged screen position while changing scale.
 	end
 
 	local themes = {
@@ -218,7 +193,8 @@
 		utility = {
 			["outline"] = {
 				["BackgroundColor3"] = {}, 	
-				["Color"] = {}, 
+				["Color"] = {},
+				["ScrollBarImageColor3"] = {},
 			},
 			["inline"] = {
 				["BackgroundColor3"] = {}, 	
@@ -322,23 +298,8 @@
 		makefolder(library.directory .. path)
 	end 
 
-	writefile("ffff.ttf", game:HttpGet("https://github.com/weasely111/beta/raw/refs/heads/main/fs-tahoma-8px.ttf"))
-
-	local tahoma = {
-		name = "SmallestPixel7",
-		faces = {
-			{
-				name = "Regular",
-				weight = 400,
-				style = "normal",
-				assetId = getcustomasset("ffff.ttf")
-			}
-		}
-	}
-
-	writefile("dddd.ttf", http_service:JSONEncode(tahoma))
-
-	library.font = Font.new(getcustomasset("dddd.ttf"), Enum.FontWeight.Regular)
+	-- The old 8 px bitmap face becomes illegible when the panel is scaled down.
+	library.font = Font.new("rbxasset://fonts/families/SourceSansPro.json", Enum.FontWeight.Regular)
 
 	local config_holder 
 -- 
@@ -446,13 +407,20 @@
 			end)
 		end
 
-		function library:draggify(frame)
+		function library:draggify(frame, edges_only)
 			local dragging = false 
 			local start_position
 			local start 
 
 			frame.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					if edges_only then
+						local point = input.Position - frame.AbsolutePosition
+						local width = frame.AbsoluteSize.X
+						if point.Y > 24 and point.X > 7 and point.X < width - 7 then
+							return
+						end
+					end
 					dragging = true
 					start = input.Position
 					start_position = frame.AbsolutePosition
@@ -470,7 +438,7 @@
 				end
 			end)
 
-			frame.InputEnded:Connect(function(input)
+			library:connection(uis.InputEnded, function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
 					dragging = false
 				end
@@ -556,14 +524,20 @@
 		function library:config_list_update() 
 			if not config_holder then return end 
 		
-			local list = {}
+			local list, seen = {}, {}
 		
-			for idx, file in next, listfiles(library.directory .. "/configs") do
-				local name = string.sub(file:gsub(library.directory .. "/configs\\", ""):gsub(library.directory .. "\\configs\\", ""), 1, -5)
-				list[#list + 1] = name
+			for _, file in next, listfiles(library.directory .. "/configs") do
+				local name = tostring(file):match("([^/\\]+)%.cfg$")
+				if name and not seen[name] then
+					seen[name] = true
+					list[#list + 1] = name
+				end
 			end
-			
+			table.sort(list)
 			config_holder.refresh_options(list)
+			if flags.config_name_list and seen[flags.config_name_list] then
+				config_holder.set(flags.config_name_list)
+			end
 		end 
 
 		function library:get_config()
@@ -649,8 +623,13 @@
 			end
 			
 			if instance == "TextLabel" or instance == "TextButton" or instance == "TextBox" then 	
+				if options.TextSize == 12 then
+					ins.TextSize = 14
+				end
 				library:apply_theme(ins, "text", "TextColor3")
-				library:apply_stroke(ins)
+				if options.Text and options.Text ~= "" then
+					library:apply_stroke(ins)
+				end
 			elseif instance == "ScreenGui" then 
 				insert(library.guis, ins)
 			end
@@ -800,7 +779,7 @@
 					})
 					items.ui_scale = library:attach_ui_scale(items.main_holder)
 					insert(library.panel_frames, items.main_holder)
-					library:draggify(items.main_holder)
+					library:draggify(items.main_holder, true)
 					library:make_resizable(items.main_holder)
 
 					local Close = library:create( "TextButton" , {
@@ -1684,7 +1663,7 @@
 
 				local items = main_window.items
 
-				window["tab_holder"] = library:create("Frame", {
+				window["tab_holder"] = library:create("ScrollingFrame", {
 					Parent = items.holder,
 					Name = " ",
 					BackgroundTransparency = 1,
@@ -1692,16 +1671,107 @@
 					BorderColor3 = rgb(0, 0, 0),
 					ZIndex = 5,
 					BorderSizePixel = 0,
+					Active = true,
+					Selectable = false,
+					ClipsDescendants = true,
+					ScrollingDirection = Enum.ScrollingDirection.X,
+					ScrollingEnabled = true,
+					ScrollBarThickness = 1,
+					ScrollBarImageColor3 = themes.preset.outline,
+					AutomaticCanvasSize = Enum.AutomaticSize.X,
+					CanvasSize = dim2(0, 0, 0, 0),
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
+				library:apply_theme(window["tab_holder"], "outline", "ScrollBarImageColor3")
 
-				library:create("UIListLayout", {
+				local tab_layout = library:create("UIListLayout", {
 					Parent = window["tab_holder"],
 					FillDirection = Enum.FillDirection.Horizontal,
-					HorizontalFlex = Enum.UIFlexAlignment.Fill,
 					Padding = dim(0, 2),
 					SortOrder = Enum.SortOrder.LayoutOrder
 				})
+				window.tab_buttons = {}
+				local function max_tab_scroll()
+					return math.max(0, window.tab_holder.AbsoluteCanvasSize.X - window.tab_holder.AbsoluteWindowSize.X)
+				end
+				local function set_tab_scroll(x)
+					window.tab_holder.CanvasPosition = vec2(clamp(x, 0, max_tab_scroll()), 0)
+				end
+				function window:update_tab_layout()
+					local count = #self.tab_buttons
+					if count == 0 then return end
+					local scale = library:get_ui_scale(self.tab_holder)
+					local width = self.tab_holder.AbsoluteSize.X / math.max(scale, 0.01)
+					local button_width = math.max(115, floor((width - (count - 1) * 2) / count))
+					for _, button in self.tab_buttons do
+						button.Size = dim2(0, button_width, 1, -2)
+					end
+					task.defer(function()
+						if self.tab_holder.Parent then
+							set_tab_scroll(self.tab_holder.CanvasPosition.X)
+							if self.active_tab_button then self:ensure_tab_visible(self.active_tab_button) end
+						end
+					end)
+				end
+				function window:ensure_tab_visible(button)
+					local viewport = self.tab_holder
+					local left = viewport.AbsolutePosition.X
+					local right = left + viewport.AbsoluteSize.X
+					local button_left = button.AbsolutePosition.X
+					local button_right = button_left + button.AbsoluteSize.X
+					if button_left < left then
+						set_tab_scroll(viewport.CanvasPosition.X + button_left - left - 2)
+					elseif button_right > right then
+						set_tab_scroll(viewport.CanvasPosition.X + button_right - right + 2)
+					end
+				end
+				library:connection(window.tab_holder:GetPropertyChangedSignal("AbsoluteSize"), function()
+					window:update_tab_layout()
+				end)
+				library:connection(tab_layout:GetPropertyChangedSignal("AbsoluteContentSize"), function()
+					set_tab_scroll(window.tab_holder.CanvasPosition.X)
+				end)
+				local tab_drag = {input = nil, moved = false}
+				function window:begin_tab_drag(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1
+						and input.UserInputType ~= Enum.UserInputType.Touch then return end
+					tab_drag.input = input
+					tab_drag.start_x = input.Position.X
+					tab_drag.start_scroll = self.tab_holder.CanvasPosition.X
+					tab_drag.moved = false
+				end
+				library:connection(window.tab_holder.InputBegan, function(input)
+					window:begin_tab_drag(input)
+				end)
+				library:connection(uis.InputChanged, function(input)
+					if not tab_drag.input then return end
+					local is_mouse = tab_drag.input.UserInputType == Enum.UserInputType.MouseButton1
+						and input.UserInputType == Enum.UserInputType.MouseMovement
+					if not is_mouse and input ~= tab_drag.input then return end
+					local delta = input.Position.X - tab_drag.start_x
+					if tab_drag.moved or math.abs(delta) >= 6 then
+						tab_drag.moved = true
+						if is_mouse then set_tab_scroll(tab_drag.start_scroll - delta) end
+					end
+				end)
+				library:connection(uis.InputEnded, function(input)
+					if not tab_drag.input then return end
+					if input == tab_drag.input or (tab_drag.input.UserInputType == Enum.UserInputType.MouseButton1
+						and input.UserInputType == Enum.UserInputType.MouseButton1) then
+						if tab_drag.moved then window.tab_click_blocked_until = os.clock() + 0.15 end
+						tab_drag.input = nil
+					end
+				end)
+				library:connection(uis.InputChanged, function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseWheel then return end
+					local point = uis:GetMouseLocation()
+					local origin = window.tab_holder.AbsolutePosition
+					local size = window.tab_holder.AbsoluteSize
+					if point.X >= origin.X and point.X <= origin.X + size.X
+						and point.Y >= origin.Y and point.Y <= origin.Y + size.Y then
+						set_tab_scroll(window.tab_holder.CanvasPosition.X - input.Position.Z * 45)
+					end
+				end)
 
 				local section_holder = library:create("Frame", {
 					Parent = items.holder,
@@ -1840,10 +1910,22 @@
 						blur.Size = int
 					end
 				end})
-				section:slider({name = "UI Scale", suffix = "%", flag = "UI Scale", min = 60, max = 110, default = auto_ui_scale, interval = 1, callback = function(int)
+				local pending_ui_scale
+				library:connection(uis.InputEnded, function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 and pending_ui_scale then
+						local percent = pending_ui_scale
+						pending_ui_scale = nil
+						library:set_ui_scale(percent)
+					end
+				end)
+				section:slider({name = "UI Scale", suffix = "%", flag = "UI Scale", min = 60, max = 150, default = auto_ui_scale, interval = 1, callback = function(int)
 					library.ui_scale_percent = int
 					if library.ui_layout_ready then
-						library:set_ui_scale(int)
+						if uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+							pending_ui_scale = int
+						else
+							library:set_ui_scale(int)
+						end
 					end
 				end})
 				local section = column:section({name = "Other"})
@@ -1908,12 +1990,17 @@
 						library:config_list_update()
 					end})
 					section:button({name = "Delete", callback = function()
-						delfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg")
+						local selected = flags["config_name_list"]
+						if type(selected) ~= "string" or selected == "" then return end
+						delfile(library.directory .. "/configs/" .. selected .. ".cfg")
+						flags["config_name_list"] = nil
 						library:config_list_update()
 					end})
 					section:button_holder({})
 					section:button({name = "Load", callback = function()
-						library:load_config(readfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg"))
+						local selected = flags["config_name_list"]
+						if type(selected) ~= "string" or selected == "" then return end
+						library:load_config(readfile(library.directory .. "/configs/" .. selected .. ".cfg"))
 						library:notification({text = "Loaded Config: " .. flags["config_name_list"], time = 3})
 					end})
 					section:button({name = "Save", callback = function()
@@ -2670,11 +2757,17 @@
 					Name = "\0",
 					BorderSizePixel = 0,
 					Size = dim2(0, 0, 1, -2),
+					LayoutOrder = #self.tab_buttons + 1,
 					ZIndex = 5,
 					TextSize = 12,
 					BackgroundColor3 = themes.preset.outline,
 					AutoButtonColor = false
 				}) library:apply_theme(tab_holder, "outline", "BackgroundColor3") 
+				insert(self.tab_buttons, tab_holder)
+				self:update_tab_layout()
+				library:connection(tab_holder.InputBegan, function(input)
+					self:begin_tab_drag(input)
+				end)
 
 				local inline = library:create("Frame", {
 					Parent = tab_holder,
@@ -2767,6 +2860,10 @@
 				button:FindFirstChildOfClass("TextLabel").TextColor3 = themes.preset.accent 
 
 				library.current_tab[2].Visible = true 
+				self.active_tab_button = tab_holder
+				task.defer(function()
+					if tab_holder.Parent then self:ensure_tab_visible(tab_holder) end
+				end)
 
 				if library.current_element_open and library.current_element_open ~= cfg then 
 					library.current_element_open.set_visible(false)
@@ -2775,7 +2872,10 @@
 				end
 			end
 			
-			tab_holder.MouseButton1Click:Connect(cfg.open_tab)
+			library:connection(tab_holder.MouseButton1Click, function()
+				if (self.tab_click_blocked_until or 0) > os.clock() then return end
+				cfg.open_tab()
+			end)
 			
 			return setmetatable(cfg, library) 
 		end
@@ -3237,8 +3337,9 @@
 					Name = "bottom_components",
 					Position = dim2(0, 0, 0, cfg.name and 15 or 0),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(1, 0, 0, 0),
+					Size = dim2(1, 0, 0, 14),
 					BorderSizePixel = 0,
+					BackgroundTransparency = 1,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
 				
@@ -3247,7 +3348,7 @@
 					Name = "slider",
 					Position = dim2(0, 0, 0, 2),
 					BorderColor3 = rgb(0, 0, 0),
-					Size = dim2(1, -1, 1, 12),
+					Size = dim2(1, -1, 0, 12),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline,
 					Text = "",
@@ -3292,19 +3393,45 @@
 					FontFace = library.font,
 					TextColor3 = themes.preset.text,
 					BorderColor3 = rgb(0, 0, 0),
-					Text = "12.50/100.00",
+					Text = "0",
 					Name = "text",
+					Active = true,
 					BackgroundTransparency = 1,
-					Position = dim2(0, 0, 0, -1),
-					Size = dim2(1, 0, 1, 0),
+					Position = dim2(1, -76, 0, -1),
+					Size = dim2(0, 72, 1, 0),
 					BorderSizePixel = 0,
 					TextSize = 12,
+					TextXAlignment = Enum.TextXAlignment.Right,
 					ZIndex = 2,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
+				local fill_clip = library:create("Frame", {
+					Parent = contrast,
+					Name = "fill_clip",
+					Size = dim2(1, 0, 1, 0),
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					ClipsDescendants = true,
+				})
+				local value_input = library:create("TextBox", {
+					Parent = contrast,
+					Name = "value_input",
+					FontFace = library.font,
+					TextColor3 = themes.preset.text,
+					Text = "",
+					TextSize = 14,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					Position = dim2(1, -76, 0, -1),
+					Size = dim2(0, 72, 1, 0),
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					ClearTextOnFocus = false,
+					Visible = false,
+					ZIndex = 4,
+				})
 				
 				local fill = library:create("Frame", {
-					Parent = contrast,
+					Parent = fill_clip,
 					Name = "fill",
 					BorderColor3 = rgb(0, 0, 0),
 					Size = dim2(1, 0, 1, 0),
@@ -3339,27 +3466,36 @@
 					}
 				})
 				
-				library:create("UIListLayout", {
-					Parent = bottom_components,
-					Padding = dim(0, 10),
-					Name = "_",
-					SortOrder = Enum.SortOrder.LayoutOrder
-				})
 			--  
 
+			local function format_value(value)
+				local formatted = string.format("%.3f", value)
+				return formatted:gsub("0+$", ""):gsub("%.$", "")
+			end
+
+			local function update_visual()
+				local range = cfg.max - cfg.min
+				local normalized = range == 0 and 0 or clamp((cfg.value - cfg.min) / range, 0, 1)
+				fill.Size = dim2(normalized, 0, 1, 0)
+			end
+
 			function cfg.set(value)
-				if type(value) == "userdata" then 
+				value = tonumber(value)
+				if not value then
 					return 
 				end
 
-				cfg.value = math.clamp(library:round(value, cfg.intervals), cfg.min, cfg.max)
+				cfg.value = math.clamp(library:round(value, math.max(cfg.intervals, 0.001)), cfg.min, cfg.max)
 
-				fill.Size = dim2((cfg.value - cfg.min) / (cfg.max - cfg.min), 0, 1, 0)
-				slidertext.Text = tostring(cfg.value) .. cfg.suffix .. "/" .. tostring(cfg.max) .. cfg.suffix
+				update_visual()
+				slidertext.Text = format_value(cfg.value) .. cfg.suffix
+				value_input.Text = format_value(cfg.value)
 				flags[cfg.flag] = cfg.value
 
 				cfg.callback(flags[cfg.flag])
 			end
+
+			library:connection(contrast:GetPropertyChangedSignal("AbsoluteSize"), update_visual)
 
 			function cfg.set_element_visible(bool)
 				slider_REAL.Visible = bool 
@@ -3370,10 +3506,31 @@
 			end
 
 			if not cfg.input_disabled then 
+				local last_value_click = 0
+				slidertext.InputBegan:Connect(function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+					local now = os.clock()
+					if now - last_value_click <= 0.35 then
+						cfg.dragging = false
+						value_input.Visible = true
+						slidertext.Visible = false
+						value_input:CaptureFocus()
+						last_value_click = 0
+					else
+						last_value_click = now
+					end
+				end)
+				value_input.FocusLost:Connect(function()
+					cfg.set(value_input.Text)
+					value_input.Visible = false
+					slidertext.Visible = true
+				end)
 				library:connection(uis.InputChanged, function(input)
 					if cfg.dragging and input.UserInputType == Enum.UserInputType.MouseMovement then 
-						local size_x = (input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X
-						local value = ((cfg.max - cfg.min) * size_x) + cfg.min
+						local width = contrast.AbsoluteSize.X
+						if width <= 0 then return end
+						local normalized = clamp((input.Position.X - contrast.AbsolutePosition.X) / width, 0, 1)
+						local value = ((cfg.max - cfg.min) * normalized) + cfg.min
 						cfg.set(value)
 					end
 				end)
@@ -3508,9 +3665,8 @@
 					Size = dim2(0, 14, 0, 14),
 					BorderSizePixel = 0,
 					ZIndex = 1, 
-					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(toggle, "outline", "BackgroundColor3") 
-				library:apply_theme(toggle, "accent", "BackgroundColor3") 
+					BackgroundColor3 = themes.preset.accent
+				}) library:apply_theme(toggle, "accent", "BackgroundColor3")
 
 				local inline = library:create("Frame", {
 					Parent = toggle,
@@ -3555,7 +3711,7 @@
 					BorderSizePixel = 0,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
-				library:apply_theme(background, "accent", "BackgroundColor3") 
+				library:apply_theme(background, "high_contrast", "BackgroundColor3")
 
 				local UIGradient = library:create("UIGradient", {
 					Parent = background,
@@ -3571,6 +3727,7 @@
 			library:hoverify(toggle_holder, toggle)
 
 			function cfg.set(bool)
+				cfg.enabled = bool
 				library:tween(accent, {BackgroundTransparency = bool and 0 or 1})
 				flags[cfg.flag] = bool
 				
@@ -4610,7 +4767,7 @@
 				name = options.name or nil,
 				flag = options.flag or tostring(random(1,9999999)),
 
-				items = options.items or {"1", "2", "3"},
+				items = options.items or {},
 				callback = options.callback or function() end,
 				multi = options.multi or false, 
 				visible = options.visible or true,
@@ -5068,7 +5225,7 @@
 				callback = options and options.callback or function() end, 
 
 				scale = options.size or 232, 
-				items = options.items or {"1", "2", "3"}, 
+				items = options.items or {},
 				-- order = options.order or 1, 
 				placeholdertext = options.placeholder or options.placeholdertext or "search here...",
 				visible = options.visible or true,
@@ -5133,7 +5290,7 @@
 					Size = dim2(1, -27, 1, cfg.scale),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
+				}) library:apply_theme(list, "outline", "BackgroundColor3")
 				
 				local inline = library:create("Frame", {
 					Parent = list,
@@ -5970,7 +6127,7 @@
 					Size = dim2(0, 1, 0, 12),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
+				}) library:apply_theme(Frame, "outline", "BackgroundColor3")
 				
 				local UIListLayout = library:create("UIListLayout", {
 					Parent = TextButton,
@@ -5995,7 +6152,7 @@
 					Size = dim2(1, 0, 0, 1),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
+				}) library:apply_theme(line, "outline", "BackgroundColor3")
 
 				path.instance = TextButton 
 				path.line = line 
