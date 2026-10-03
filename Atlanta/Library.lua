@@ -96,6 +96,7 @@
 		drawings = {};
 		ui_scales = {};
 		panel_frames = {};
+		drag_callbacks = {};
 		ui_scale = 1;
 		ui_scale_percent = 100;
 		ui_layout_ready = false;
@@ -447,14 +448,14 @@
 
 		function library:draggify(frame)
 			local dragging = false 
-			local start_size = frame.Position
+			local start_position
 			local start 
 
 			frame.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
 					dragging = true
 					start = input.Position
-					start_size = frame.Position
+					start_position = frame.AbsolutePosition
 
 					if library.current_element_open then 
 						library.current_element_open.set_visible(false)
@@ -481,23 +482,26 @@
 					local viewport_y = camera.ViewportSize.Y
 					local frame_width = frame.AbsoluteSize.X
 					local frame_height = frame.AbsoluteSize.Y
-					local current_position = dim2(
+					local anchor = frame.AnchorPoint
+					local x = clamp(
+						start_position.X + (input.Position.X - start.X),
 						0,
-						clamp(
-							start_size.X.Offset + (input.Position.X - start.X),
-							0,
-							math.max(0, viewport_x - frame_width)
-						),
-						0,
-						clamp(
-							start_size.Y.Offset + (input.Position.Y - start.Y),
-							0,
-							math.max(0, viewport_y - frame_height)
-						)
+						math.max(0, viewport_x - frame_width)
 					)
-
-					frame.Position = current_position
+					local y = clamp(
+						start_position.Y + (input.Position.Y - start.Y),
+						0,
+						math.max(0, viewport_y - frame_height)
+					)
+					frame.Position = dim2(
+						0,
+						x + frame_width * anchor.X,
+						0,
+						y + frame_height * anchor.Y
+					)
 					frame:SetAttribute("AtlantaUserMoved", true)
+					local callback = library.drag_callbacks[frame]
+					if callback then callback(frame.Position) end
 				end
 			end)
 		end
@@ -1359,9 +1363,11 @@
 			local dock_sgui;
 			local blur = library:create( "BlurEffect" , {
 				Parent = lighting;
+				Name = "AtlantaBlurEffect",
 				Enabled = true;
 				Size = 15
 			});    
+			insert(library.instances, blur)
 
 			library.cache = library:create("ScreenGui", {
 				Enabled = false,
@@ -1842,7 +1848,7 @@
 				end})
 				local section = column:section({name = "Other"})
 				section:label({name = "UI Bind"})
-				:keybind({callback = window.set_menu_visibility, key = Enum.KeyCode.Insert})
+				library.menu_keybind = section:keybind({callback = window.set_menu_visibility, key = Enum.KeyCode.Insert})
 				section:toggle({name = "Keybind List", flag = "keybind_list", callback = function(bool)
 					library.keybind_list_frame.Visible = bool
 				end})
@@ -1878,6 +1884,7 @@
 			-- 
 
 			-- cfg holder
+			if not (properties and properties.skip_configurations) then
 				local holder = library:panel({
 					name = "Configurations", 
 					size = dim2(0, 324, 0, 410),
@@ -1936,6 +1943,7 @@
 						blur:Destroy()
 					end})
 			-- 
+			end
 					
 			-- esp preview
 				local holder = library:panel({
@@ -1993,6 +2001,7 @@
 				AutomaticSize = Enum.AutomaticSize.X,
 				BackgroundColor3 = themes.preset.outline
 			}) library:apply_theme(watermark_outline, "outline", "BackgroundColor3") 
+			cfg.Instance = watermark_outline
 			watermark_outline.Position = dim_offset(watermark_outline.AbsolutePosition.X, watermark_outline.AbsolutePosition.Y)
 			library:draggify(watermark_outline)
 
@@ -3185,6 +3194,7 @@
 					TextSize = 12,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
+				cfg.items = {Slider = {Instance = slider_REAL}}
 				
 				local TEXT_LABEL; 
 				if cfg.name then 
@@ -4421,19 +4431,19 @@
 					end
 				end 
 
-				function cfg.set_mode(mode) 
+				function cfg.set_mode(mode, skip_callback)
 					cfg.mode = mode 
 
 					if mode == "always" then
-						cfg.set(true)
+						cfg.set(true, skip_callback)
 					elseif mode == "hold" then
-						cfg.set(false)
+						cfg.set(false, skip_callback)
 					end
 
 					flags[cfg.flag]["mode"] = mode
 				end 
 
-				function cfg.set(input)
+				function cfg.set(input, skip_callback)
 					if type(input) == "boolean" then 
 						local __cached = input 
 
@@ -4443,7 +4453,7 @@
 
 						cfg.active = __cached 
 						flags[cfg.flag]["active"] = __cached 
-						cfg.callback(__cached)
+						if not skip_callback then cfg.callback(__cached) end
 					elseif tostring(input):find("Enum") then 
 						input = input.Name == "Escape" and "none" or input
 						
@@ -4458,15 +4468,15 @@
 
 						key_text.Text = string.lower(_text2)
 
-						cfg.callback(cfg.active or false)
+						if not skip_callback then cfg.callback(cfg.active or false) end
 					elseif find({"toggle", "hold", "always"}, input) then 
-						cfg.set_mode(input)
+						cfg.set_mode(input, skip_callback)
 
 						if input == "always" then 
 							cfg.active = true 
 						end 
 
-						cfg.callback(cfg.active or false)
+						if not skip_callback then cfg.callback(cfg.active or false) end
 					elseif type(input) == "table" then 
 						input.key = type(input.key) == "string" and input.key ~= "none" and library:convert_enum(input.key) or input.key
 
