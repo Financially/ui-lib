@@ -164,22 +164,10 @@
 	end
 
 	function library:set_ui_scale(percent)
-		local previous_scale = library.ui_scale or 1
 		library.ui_scale_percent = clamp(tonumber(percent) or 100, 60, 110)
 		library.ui_scale = library.ui_scale_percent / 100
-		local ratio = library.ui_scale / previous_scale
-		local center_x = camera.ViewportSize.X * 0.5
-
-		for _, frame in library.panel_frames do
-			if frame and frame.Parent then
-				frame.Position = dim2(
-					frame.Position.X.Scale,
-					center_x + (frame.Position.X.Offset - center_x) * ratio,
-					frame.Position.Y.Scale,
-					frame.Position.Y.Offset * ratio
-				)
-			end
-		end
+		-- UIScale changes the contents of each panel around its top-left corner.
+		-- Moving the outer frames as well makes dragged panels jump on every edit.
 
 		for _, ui_scale in library.ui_scales do
 			if ui_scale and ui_scale.Parent then
@@ -187,20 +175,7 @@
 			end
 		end
 
-		if library.ui_layout_ready then
-			task.defer(function()
-				run.RenderStepped:Wait()
-				library:fit_panels_to_viewport()
-				if library.dock_outline
-					and library.dock_outline.Parent
-					and not library.dock_outline:GetAttribute("AtlantaUserMoved") then
-					library.dock_outline.Position = dim_offset(
-						(camera.ViewportSize.X - library.dock_outline.AbsoluteSize.X) * 0.5,
-						0
-					)
-				end
-			end)
-		end
+		-- Keep each panel at its dragged screen position while changing scale.
 	end
 
 	local themes = {
@@ -322,23 +297,8 @@
 		makefolder(library.directory .. path)
 	end 
 
-	writefile("ffff.ttf", game:HttpGet("https://github.com/weasely111/beta/raw/refs/heads/main/fs-tahoma-8px.ttf"))
-
-	local tahoma = {
-		name = "SmallestPixel7",
-		faces = {
-			{
-				name = "Regular",
-				weight = 400,
-				style = "normal",
-				assetId = getcustomasset("ffff.ttf")
-			}
-		}
-	}
-
-	writefile("dddd.ttf", http_service:JSONEncode(tahoma))
-
-	library.font = Font.new(getcustomasset("dddd.ttf"), Enum.FontWeight.Regular)
+	-- The old 8 px bitmap face becomes illegible when the panel is scaled down.
+	library.font = Font.new("rbxasset://fonts/families/SourceSansPro.json", Enum.FontWeight.Regular)
 
 	local config_holder 
 -- 
@@ -446,13 +406,20 @@
 			end)
 		end
 
-		function library:draggify(frame)
+		function library:draggify(frame, edges_only)
 			local dragging = false 
 			local start_position
 			local start 
 
 			frame.InputBegan:Connect(function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					if edges_only then
+						local point = input.Position - frame.AbsolutePosition
+						local width = frame.AbsoluteSize.X
+						if point.Y > 24 and point.X > 7 and point.X < width - 7 then
+							return
+						end
+					end
 					dragging = true
 					start = input.Position
 					start_position = frame.AbsolutePosition
@@ -470,7 +437,7 @@
 				end
 			end)
 
-			frame.InputEnded:Connect(function(input)
+			library:connection(uis.InputEnded, function(input)
 				if input.UserInputType == Enum.UserInputType.MouseButton1 then
 					dragging = false
 				end
@@ -556,14 +523,20 @@
 		function library:config_list_update() 
 			if not config_holder then return end 
 		
-			local list = {}
+			local list, seen = {}, {}
 		
-			for idx, file in next, listfiles(library.directory .. "/configs") do
-				local name = string.sub(file:gsub(library.directory .. "/configs\\", ""):gsub(library.directory .. "\\configs\\", ""), 1, -5)
-				list[#list + 1] = name
+			for _, file in next, listfiles(library.directory .. "/configs") do
+				local name = tostring(file):match("([^/\\]+)%.cfg$")
+				if name and not seen[name] then
+					seen[name] = true
+					list[#list + 1] = name
+				end
 			end
-			
+			table.sort(list)
 			config_holder.refresh_options(list)
+			if flags.config_name_list and seen[flags.config_name_list] then
+				config_holder.set(flags.config_name_list)
+			end
 		end 
 
 		function library:get_config()
@@ -649,6 +622,9 @@
 			end
 			
 			if instance == "TextLabel" or instance == "TextButton" or instance == "TextBox" then 	
+				if options.TextSize == 12 then
+					ins.TextSize = 14
+				end
 				library:apply_theme(ins, "text", "TextColor3")
 				library:apply_stroke(ins)
 			elseif instance == "ScreenGui" then 
@@ -800,7 +776,7 @@
 					})
 					items.ui_scale = library:attach_ui_scale(items.main_holder)
 					insert(library.panel_frames, items.main_holder)
-					library:draggify(items.main_holder)
+					library:draggify(items.main_holder, true)
 					library:make_resizable(items.main_holder)
 
 					local Close = library:create( "TextButton" , {
@@ -1840,10 +1816,22 @@
 						blur.Size = int
 					end
 				end})
+				local pending_ui_scale
+				library:connection(uis.InputEnded, function(input)
+					if input.UserInputType == Enum.UserInputType.MouseButton1 and pending_ui_scale then
+						local percent = pending_ui_scale
+						pending_ui_scale = nil
+						library:set_ui_scale(percent)
+					end
+				end)
 				section:slider({name = "UI Scale", suffix = "%", flag = "UI Scale", min = 60, max = 110, default = auto_ui_scale, interval = 1, callback = function(int)
 					library.ui_scale_percent = int
 					if library.ui_layout_ready then
-						library:set_ui_scale(int)
+						if uis:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+							pending_ui_scale = int
+						else
+							library:set_ui_scale(int)
+						end
 					end
 				end})
 				local section = column:section({name = "Other"})
@@ -1908,12 +1896,17 @@
 						library:config_list_update()
 					end})
 					section:button({name = "Delete", callback = function()
-						delfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg")
+						local selected = flags["config_name_list"]
+						if type(selected) ~= "string" or selected == "" then return end
+						delfile(library.directory .. "/configs/" .. selected .. ".cfg")
+						flags["config_name_list"] = nil
 						library:config_list_update()
 					end})
 					section:button_holder({})
 					section:button({name = "Load", callback = function()
-						library:load_config(readfile(library.directory .. "/configs/" .. flags["config_name_list"] .. ".cfg"))
+						local selected = flags["config_name_list"]
+						if type(selected) ~= "string" or selected == "" then return end
+						library:load_config(readfile(library.directory .. "/configs/" .. selected .. ".cfg"))
 						library:notification({text = "Loaded Config: " .. flags["config_name_list"], time = 3})
 					end})
 					section:button({name = "Save", callback = function()
@@ -3292,15 +3285,33 @@
 					FontFace = library.font,
 					TextColor3 = themes.preset.text,
 					BorderColor3 = rgb(0, 0, 0),
-					Text = "12.50/100.00",
+					Text = "0",
 					Name = "text",
+					Active = true,
 					BackgroundTransparency = 1,
-					Position = dim2(0, 0, 0, -1),
-					Size = dim2(1, 0, 1, 0),
+					Position = dim2(1, -76, 0, -1),
+					Size = dim2(0, 72, 1, 0),
 					BorderSizePixel = 0,
 					TextSize = 12,
+					TextXAlignment = Enum.TextXAlignment.Right,
 					ZIndex = 2,
 					BackgroundColor3 = rgb(255, 255, 255)
+				})
+				local value_input = library:create("TextBox", {
+					Parent = contrast,
+					Name = "value_input",
+					FontFace = library.font,
+					TextColor3 = themes.preset.text,
+					Text = "",
+					TextSize = 14,
+					TextXAlignment = Enum.TextXAlignment.Right,
+					Position = dim2(1, -76, 0, -1),
+					Size = dim2(0, 72, 1, 0),
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					ClearTextOnFocus = false,
+					Visible = false,
+					ZIndex = 4,
 				})
 				
 				local fill = library:create("Frame", {
@@ -3347,15 +3358,22 @@
 				})
 			--  
 
+			local function format_value(value)
+				local formatted = string.format("%.3f", value)
+				return formatted:gsub("0+$", ""):gsub("%.$", "")
+			end
+
 			function cfg.set(value)
-				if type(value) == "userdata" then 
+				value = tonumber(value)
+				if not value then
 					return 
 				end
 
-				cfg.value = math.clamp(library:round(value, cfg.intervals), cfg.min, cfg.max)
+				cfg.value = math.clamp(library:round(value, math.max(cfg.intervals, 0.001)), cfg.min, cfg.max)
 
-				fill.Size = dim2((cfg.value - cfg.min) / (cfg.max - cfg.min), 0, 1, 0)
-				slidertext.Text = tostring(cfg.value) .. cfg.suffix .. "/" .. tostring(cfg.max) .. cfg.suffix
+				fill.Size = dim2(cfg.max == cfg.min and 0 or (cfg.value - cfg.min) / (cfg.max - cfg.min), 0, 1, 0)
+				slidertext.Text = format_value(cfg.value) .. cfg.suffix
+				value_input.Text = format_value(cfg.value)
 				flags[cfg.flag] = cfg.value
 
 				cfg.callback(flags[cfg.flag])
@@ -3370,6 +3388,25 @@
 			end
 
 			if not cfg.input_disabled then 
+				local last_value_click = 0
+				slidertext.InputBegan:Connect(function(input)
+					if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+					local now = os.clock()
+					if now - last_value_click <= 0.35 then
+						cfg.dragging = false
+						value_input.Visible = true
+						slidertext.Visible = false
+						value_input:CaptureFocus()
+						last_value_click = 0
+					else
+						last_value_click = now
+					end
+				end)
+				value_input.FocusLost:Connect(function()
+					cfg.set(value_input.Text)
+					value_input.Visible = false
+					slidertext.Visible = true
+				end)
 				library:connection(uis.InputChanged, function(input)
 					if cfg.dragging and input.UserInputType == Enum.UserInputType.MouseMovement then 
 						local size_x = (input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X
@@ -3508,9 +3545,8 @@
 					Size = dim2(0, 14, 0, 14),
 					BorderSizePixel = 0,
 					ZIndex = 1, 
-					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(toggle, "outline", "BackgroundColor3") 
-				library:apply_theme(toggle, "accent", "BackgroundColor3") 
+					BackgroundColor3 = themes.preset.accent
+				}) library:apply_theme(toggle, "accent", "BackgroundColor3")
 
 				local inline = library:create("Frame", {
 					Parent = toggle,
@@ -3555,7 +3591,7 @@
 					BorderSizePixel = 0,
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
-				library:apply_theme(background, "accent", "BackgroundColor3") 
+				library:apply_theme(background, "high_contrast", "BackgroundColor3")
 
 				local UIGradient = library:create("UIGradient", {
 					Parent = background,
@@ -3571,6 +3607,7 @@
 			library:hoverify(toggle_holder, toggle)
 
 			function cfg.set(bool)
+				cfg.enabled = bool
 				library:tween(accent, {BackgroundTransparency = bool and 0 or 1})
 				flags[cfg.flag] = bool
 				
@@ -4610,7 +4647,7 @@
 				name = options.name or nil,
 				flag = options.flag or tostring(random(1,9999999)),
 
-				items = options.items or {"1", "2", "3"},
+				items = options.items or {},
 				callback = options.callback or function() end,
 				multi = options.multi or false, 
 				visible = options.visible or true,
@@ -5068,7 +5105,7 @@
 				callback = options and options.callback or function() end, 
 
 				scale = options.size or 232, 
-				items = options.items or {"1", "2", "3"}, 
+				items = options.items or {},
 				-- order = options.order or 1, 
 				placeholdertext = options.placeholder or options.placeholdertext or "search here...",
 				visible = options.visible or true,
@@ -5133,7 +5170,7 @@
 					Size = dim2(1, -27, 1, cfg.scale),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
+				}) library:apply_theme(list, "outline", "BackgroundColor3")
 				
 				local inline = library:create("Frame", {
 					Parent = list,
@@ -5970,7 +6007,7 @@
 					Size = dim2(0, 1, 0, 12),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
+				}) library:apply_theme(Frame, "outline", "BackgroundColor3")
 				
 				local UIListLayout = library:create("UIListLayout", {
 					Parent = TextButton,
@@ -5995,7 +6032,7 @@
 					Size = dim2(1, 0, 0, 1),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
-				}) library:apply_theme(main_holder, "outline", "BackgroundColor3") 
+				}) library:apply_theme(line, "outline", "BackgroundColor3")
 
 				path.instance = TextButton 
 				path.line = line 
