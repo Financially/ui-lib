@@ -626,7 +626,9 @@
 					ins.TextSize = 14
 				end
 				library:apply_theme(ins, "text", "TextColor3")
-				library:apply_stroke(ins)
+				if options.Text and options.Text ~= "" then
+					library:apply_stroke(ins)
+				end
 			elseif instance == "ScreenGui" then 
 				insert(library.guis, ins)
 			end
