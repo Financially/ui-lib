@@ -6,7 +6,6 @@
 	local players = cloneref(game:GetService("Players"))
 	local ws = cloneref(game:GetService("Workspace"))
 	local http_service = cloneref(game:GetService("HttpService"))
-	local gui_service = cloneref(game:GetService("GuiService"))
 	local lighting = cloneref(game:GetService("Lighting"))
 	local run = cloneref(game:GetService("RunService"))
 	local stats = cloneref(game:GetService("Stats"))
@@ -40,7 +39,6 @@
 	local camera = ws.CurrentCamera
 	local lp = players.LocalPlayer 
 	local mouse = lp:GetMouse() 
-	local gui_offset = gui_service:GetGuiInset().Y
 
 	local max = math.max 
 	local floor = math.floor 
@@ -197,7 +195,7 @@
 					and not library.dock_outline:GetAttribute("AtlantaUserMoved") then
 					library.dock_outline.Position = dim_offset(
 						(camera.ViewportSize.X - library.dock_outline.AbsoluteSize.X) * 0.5,
-						gui_offset + 4
+						0
 					)
 				end
 			end)
@@ -1428,7 +1426,7 @@
 					Active = true,
 					BorderColor3 = rgb(0, 0, 0),
 					AnchorPoint = vec2(0, 0),
-					Position = dim2(0, (camera.ViewportSize.X - 157) * 0.5, 0, gui_offset + 4),
+					Position = dim2(0, (camera.ViewportSize.X - 157) * 0.5, 0, 0),
 					Size = dim2(0, 157, 0, 39),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
