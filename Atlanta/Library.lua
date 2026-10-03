@@ -193,7 +193,8 @@
 		utility = {
 			["outline"] = {
 				["BackgroundColor3"] = {}, 	
-				["Color"] = {}, 
+				["Color"] = {},
+				["ScrollBarImageColor3"] = {},
 			},
 			["inline"] = {
 				["BackgroundColor3"] = {}, 	
@@ -1676,11 +1677,12 @@
 					ScrollingDirection = Enum.ScrollingDirection.X,
 					ScrollingEnabled = true,
 					ScrollBarThickness = 1,
-					ScrollBarImageTransparency = 1,
+					ScrollBarImageColor3 = themes.preset.outline,
 					AutomaticCanvasSize = Enum.AutomaticSize.X,
 					CanvasSize = dim2(0, 0, 0, 0),
 					BackgroundColor3 = rgb(255, 255, 255)
 				})
+				library:apply_theme(window["tab_holder"], "outline", "ScrollBarImageColor3")
 
 				local tab_layout = library:create("UIListLayout", {
 					Parent = window["tab_holder"],
