@@ -192,6 +192,14 @@
 			task.defer(function()
 				run.RenderStepped:Wait()
 				library:fit_panels_to_viewport()
+				if library.dock_outline
+					and library.dock_outline.Parent
+					and not library.dock_outline:GetAttribute("AtlantaUserMoved") then
+					library.dock_outline.Position = dim_offset(
+						(camera.ViewportSize.X - library.dock_outline.AbsoluteSize.X) * 0.5,
+						0
+					)
+				end
 			end)
 		end
 	end
@@ -492,6 +500,7 @@
 					)
 
 					frame.Position = current_position
+					frame:SetAttribute("AtlantaUserMoved", true)
 				end
 			end)
 		end
@@ -1040,7 +1049,6 @@
 			Enabled = true,
 			Parent = gethui(),
 			Name = "",
-			IgnoreGuiInset = true,
 			DisplayOrder = 999999, 
 		})
 
@@ -1399,8 +1407,8 @@
 					Name = "",
 					Visible = true,
 					BorderColor3 = rgb(0, 0, 0),
-					AnchorPoint = vec2(0.5, 0),
-					Position = dim2(0.5, 0, 0, 4),
+					AnchorPoint = vec2(0, 0),
+					Position = dim2(0, (camera.ViewportSize.X - 157) * 0.5, 0, 0),
 					Size = dim2(0, 157, 0, 39),
 					BorderSizePixel = 0,
 					BackgroundColor3 = themes.preset.outline
@@ -1408,8 +1416,7 @@
 
 				library:apply_theme(dock_outline, "outline", "BackgroundColor3"); 
 				library:attach_ui_scale(dock_outline)
-				dock_outline.Position = dim2(0, dock_outline.AbsolutePosition.X, 0, dock_outline.AbsolutePosition.Y); 
-				dock_outline.AnchorPoint = vec2(0, 0); 
+				library.dock_outline = dock_outline
 				library:draggify(dock_outline);
 
 				local dock_inline = library:create("Frame", {
