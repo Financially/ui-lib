@@ -149,17 +149,13 @@
 		end
 
 		local margin = 6
-		local top_margin = margin
-		if library.dock_outline and library.dock_outline.Parent then
-			top_margin = gui_offset + 8 + (39 * (library.ui_scale or 1))
-		end
 		local width = max_x - min_x
 		local height = max_y - min_y
 		local shift_x = ((camera.ViewportSize.X - width) * 0.5) - min_x
 		local lowest_top = camera.ViewportSize.Y - margin - height
-		local target_min_y = top_margin
-		if lowest_top >= top_margin then
-			target_min_y = clamp(min_y, top_margin, lowest_top)
+		local target_min_y = 0
+		if lowest_top >= 0 then
+			target_min_y = clamp(min_y, 0, lowest_top)
 		end
 		local shift_y = target_min_y - min_y
 
@@ -487,8 +483,6 @@
 					local viewport_y = camera.ViewportSize.Y
 					local frame_width = frame.AbsoluteSize.X
 					local frame_height = frame.AbsoluteSize.Y
-					local min_y = frame:GetAttribute("AtlantaMinY") or 0
-
 					local current_position = dim2(
 						0,
 						clamp(
@@ -499,8 +493,8 @@
 						0,
 						clamp(
 							start_size.Y.Offset + (input.Position.Y - start.Y),
-							min_y,
-							math.max(min_y, viewport_y - frame_height)
+							0,
+							math.max(0, viewport_y - frame_height)
 						)
 					)
 
@@ -668,6 +662,7 @@
 			Enabled = true,
 			Parent = gethui(),
 			Name = "",
+			IgnoreGuiInset = true,
 			DisplayOrder = 1000001,
 			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		})
@@ -784,7 +779,10 @@
 					items.sgui = library:create("ScreenGui", {
 						Enabled = true,
 						Parent = gethui(),
-						Name = "" 
+						Name = "",
+						IgnoreGuiInset = true,
+						ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+						ResetOnSpawn = false
 					})
 					
 					items.main_holder = library:create("Frame", {
@@ -1054,6 +1052,9 @@
 			Enabled = true,
 			Parent = gethui(),
 			Name = "",
+			IgnoreGuiInset = true,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+			ResetOnSpawn = false,
 			DisplayOrder = 999999, 
 		})
 
@@ -1436,7 +1437,6 @@
 				library:apply_theme(dock_outline, "outline", "BackgroundColor3"); 
 				library:attach_ui_scale(dock_outline)
 				library.dock_outline = dock_outline
-				dock_outline:SetAttribute("AtlantaMinY", gui_offset + 4)
 				library:draggify(dock_outline);
 
 				local dock_inline = library:create("Frame", {
@@ -4117,12 +4117,12 @@
 				local mouse = uis:GetMouseLocation() 
 
 				if dragging_sat then	
-					s = math.clamp((vec2(mouse.X, mouse.Y - gui_offset) - val.AbsolutePosition).X / val.AbsoluteSize.X, 0, 1)
-					v = 1 - math.clamp((vec2(mouse.X, mouse.Y - gui_offset) - sat.AbsolutePosition).Y / sat.AbsoluteSize.Y, 0, 1)
+					s = math.clamp((vec2(mouse.X, mouse.Y) - val.AbsolutePosition).X / val.AbsoluteSize.X, 0, 1)
+					v = 1 - math.clamp((vec2(mouse.X, mouse.Y) - sat.AbsolutePosition).Y / sat.AbsoluteSize.Y, 0, 1)
 				elseif dragging_hue then 
-					h = math.clamp(1 - (vec2(mouse.X, mouse.Y - gui_offset) - hue.AbsolutePosition).Y / hue.AbsoluteSize.Y, 0, 1)
+					h = math.clamp(1 - (vec2(mouse.X, mouse.Y) - hue.AbsolutePosition).Y / hue.AbsoluteSize.Y, 0, 1)
 				elseif dragging_alpha then 
-					a = math.clamp((vec2(mouse.X, mouse.Y - gui_offset) - alpha.AbsolutePosition).X / alpha.AbsoluteSize.X, 0, 1)
+					a = math.clamp((vec2(mouse.X, mouse.Y) - alpha.AbsolutePosition).X / alpha.AbsoluteSize.X, 0, 1)
 				end
 
 				cfg.set(nil, nil)
