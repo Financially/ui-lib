@@ -1705,7 +1705,10 @@
 						button.Size = dim2(0, button_width, 1, -2)
 					end
 					task.defer(function()
-						if self.tab_holder.Parent then set_tab_scroll(self.tab_holder.CanvasPosition.X) end
+						if self.tab_holder.Parent then
+							set_tab_scroll(self.tab_holder.CanvasPosition.X)
+							if self.active_tab_button then self:ensure_tab_visible(self.active_tab_button) end
+						end
 					end)
 				end
 				function window:ensure_tab_visible(button)
@@ -2855,6 +2858,7 @@
 				button:FindFirstChildOfClass("TextLabel").TextColor3 = themes.preset.accent 
 
 				library.current_tab[2].Visible = true 
+				self.active_tab_button = tab_holder
 				task.defer(function()
 					if tab_holder.Parent then self:ensure_tab_visible(tab_holder) end
 				end)
